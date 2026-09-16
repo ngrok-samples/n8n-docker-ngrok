@@ -1,0 +1,135 @@
+services:
+
+  ngrok:
+    image: ngrok/ngrok:3
+    restart: unless-stopped
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?}    
+    command: http --url=https://${NGROK_PUBLIC_DOMAIN:?} --traffic-policy-file /etc/ngrok/n8n.yaml n8n:5678
+    volumes:
+      - ./ngrok/n8n.yaml:/etc/ngrok/n8n.yaml
+    ports:
+      - "127.0.0.1:4040:4040"
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:?}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:?}
+      DB_POSTGRESDB_USER: ${POSTGRES_NON_ROOT_USER:?}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_NON_ROOT_PASSWORD:?}
+
+      # Core
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?}
+      N8N_PROTOCOL: https
+      N8N_HOST: ${NGROK_PUBLIC_DOMAIN:?}
+      N8N_WEBHOOK_URL: https://${NGROK_PUBLIC_DOMAIN:?}
+      N8N_PROXY_HOPS: 1
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:?}
+      TZ: ${TZ:?}
+
+      # Security and hardening
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: ${N8N_BLOCK_ENV_ACCESS_IN_NODE:?}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: ${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:?}
+      N8N_CONCURRENCY_PRODUCTION_LIMIT: ${N8N_CONCURRENCY_PRODUCTION_LIMIT:?}
+      N8N_GRACEFUL_SHUTDOWN_TIMEOUT: ${N8N_GRACEFUL_SHUTDOWN_TIMEOUT:?}
+      N8N_PUBLIC_API_DISABLED: ${N8N_PUBLIC_API_DISABLED:?}
+      N8N_PUBLIC_API_SWAGGERUI_DISABLED: ${N8N_PUBLIC_API_SWAGGERUI_DISABLED:?}
+
+      # Additional security limits
+      N8N_COMMUNITY_PACKAGES_ENABLED: ${N8N_COMMUNITY_PACKAGES_ENABLED:?}
+      N8N_UNVERIFIED_PACKAGES_ENABLED: ${N8N_UNVERIFIED_PACKAGES_ENABLED:?}
+      N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: ${N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES:?}
+      N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: ${N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES:?}
+
+      # Task runners
+      N8N_RUNNERS_MODE: external
+      N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 0.0.0.0
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?}
+      N8N_RUNNERS_MAX_CONCURRENCY: ${N8N_RUNNERS_MAX_CONCURRENCY:?}
+      N8N_RUNNERS_TASK_TIMEOUT: ${N8N_RUNNERS_TASK_TIMEOUT:?}
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz/readiness"]
+      start_period: 30s
+      start_interval: 1s
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    stop_grace_period: 45s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_NON_ROOT_USER: ${POSTGRES_NON_ROOT_USER:?}
+      POSTGRES_NON_ROOT_PASSWORD: ${POSTGRES_NON_ROOT_PASSWORD:?}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - n8n_postgres:/var/lib/postgresql/data
+      - ./postgres/init-data.sh:/docker-entrypoint-initdb.d/init-data.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      start_period: 30s
+      start_interval: 1s
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  task-runners:
+    image: n8nio/runners:${N8N_VERSION:?}-distroless
+    user: "65532:65532"
+    restart: unless-stopped
+    read_only: true
+    cpus: ${DOCKER_N8N_RUNNERS_CPU_LIMIT:-2.0}
+    mem_limit: ${DOCKER_N8N_RUNNERS_MEMORY_LIMIT:?}
+    pids_limit: ${DOCKER_N8N_RUNNERS_PIDS_LIMIT:?}
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    depends_on:
+      n8n:
+        condition: service_healthy
+    environment:
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n:5679
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?}
+      N8N_RUNNERS_MAX_CONCURRENCY: ${N8N_RUNNERS_MAX_CONCURRENCY:?}
+      N8N_RUNNERS_TASK_TIMEOUT: ${N8N_RUNNERS_TASK_TIMEOUT:?}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:?}
+    stop_grace_period: 45s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  n8n_postgres:
+  n8n_data:

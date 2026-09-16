@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=https://ngrok.com/schemas/traffic-policy.json
+
+on_tcp_connect:
+  # Block traffic from unwanted sources to save ngrok processing the http request.
+  - name: Block unwanted traffic sources
+    expressions:
+      - >-
+        conn.client_ip.is_on_blocklist ||
+        'io.censys.scanners' in conn.client_ip.categories ||
+        'proxy.anonymous' in conn.client_ip.categories ||
+        'blocklist.firehol_org.level_1' in conn.client_ip.categories
+    actions:
+      - type: close-connection
+
+on_http_request:
+  # Block invalid HTTP methods, user agent names from malicious tools, and paths commonly probed by bots.
+  - name: Block unwanted HTTP requests
+    expressions:
+      - >-
+        !(req.method in ['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS']) ||
+        req.user_agent.name.matches('(?i).*(sqlmap|nikto|acunetix|nessus|arachni|dirbuster|zap|nmap).*') ||
+        req.url.path.matches('(?i)^/(\\.git|\\.env|favicon\\.ico|wp-admin|wp-login\\.php|xmlrpc\\.php|phpmyadmin|server-status|phpinfo\\.php|actuator|cgi-bin)(/.*)?$')
+    actions:
+      - type: deny
+        config:
+          status_code: 404
+
+  - name: Block search engines
+    expressions:
+      - req.url.path == '/robots.txt'
+    actions:
+      - type: custom-response
+        config:
+          body: |
+            User-agent: AhrefsBot
+            User-agent: Amazonbot
+            User-agent: ClaudeBot
+            User-agent: Claude-Web
+            User-agent: anthropic-ai
+            User-agent: Applebot
+            User-agent: Bytespider
+            User-agent: cohere-ai
+            User-agent: CCBot
+            User-agent: DataForSeoBot
+            User-agent: Diffbot
+            User-agent: DuckDuckBot
+            User-agent: DuckAssistBot
+            User-agent: Googlebot
+            User-agent: PetalBot
+            User-agent: MJ12bot
+            User-agent: meta-externalagent
+            User-agent: facebookexternalhit
+            User-agent: FacebookBot
+            User-agent: bingbot
+            User-agent: DotBot
+            User-agent: GPTBot
+            User-agent: ChatGPT-User
+            User-agent: OAI-SearchBot
+            User-agent: PerplexityBot
+            User-agent: Perplexity-User
+            User-agent: Scrapy
+            User-agent: SemrushBot
+            User-agent: ImagesiftBot
+            User-agent: Omgilibot
+            User-agent: Omgili
+            User-agent: YandexBot
+            Disallow: /
+          headers:
+            content-type: text/plain
+          status_code: 200
+
+  - name: Block bots and scrapers
+    expressions:
+      - >-
+        req.user_agent.contains('Applebot') ||
+        ('com.apple.applebot.ipv4' in conn.client_ip.categories) ||
+        req.user_agent.contains('DuckDuckBot') ||
+        req.user_agent.contains('DuckAssistBot') ||
+        ('com.duckduckgo.duckduckbot' in conn.client_ip.categories) ||
+        req.user_agent.contains('Googlebot') ||
+        ('com.google.googlebot' in conn.client_ip.categories) ||
+        req.user_agent.contains('PetalBot') ||
+        req.user_agent.contains('bingbot') ||
+        ('com.bing.bingbot.ipv4' in conn.client_ip.categories) ||
+        req.user_agent.contains('YandexBot') ||
+        ('com.yandex' in conn.client_ip.categories) ||
+        req.user_agent.contains('Amazonbot') ||
+        req.user_agent.contains('ClaudeBot') ||
+        req.user_agent.contains('Claude-Web') ||
+        req.user_agent.contains('anthropic-ai') ||
+        ('com.anthropic' in conn.client_ip.categories) ||
+        req.user_agent.contains('Bytespider') ||
+        req.user_agent.contains('cohere-ai') ||
+        req.user_agent.contains('CCBot') ||
+        ('org.commoncrawl.ccbot' in conn.client_ip.categories) ||
+        req.user_agent.contains('meta-externalagent') ||
+        req.user_agent.contains('facebookexternalhit') ||
+        req.user_agent.contains('FacebookBot') ||
+        ('com.meta.crawler' in conn.client_ip.categories) ||
+        req.user_agent.contains('GPTBot') ||
+        req.user_agent.contains('ChatGPT-User') ||
+        req.user_agent.contains('OAI-SearchBot') ||
+        ('com.openai.gptbot.ipv4' in conn.client_ip.categories) ||
+        ('com.openai.chatgpt.user.ipv4' in conn.client_ip.categories) ||
+        ('com.openai.searchbot.ipv4' in conn.client_ip.categories) ||
+        req.user_agent.contains('PerplexityBot') ||
+        req.user_agent.contains('Perplexity-User') ||
+        ('ai.perplexity' in conn.client_ip.categories) ||
+        req.user_agent.contains('ImagesiftBot') ||
+        req.user_agent.contains('Omgilibot') ||
+        req.user_agent.contains('Omgili') ||
+        req.user_agent.contains('AhrefsBot') ||
+        ('com.ahrefs' in conn.client_ip.categories) ||
+        req.user_agent.contains('DataForSeoBot') ||
+        req.user_agent.contains('MJ12bot') ||
+        req.user_agent.contains('DotBot') ||
+        req.user_agent.contains('SemrushBot') ||
+        ('com.semrush' in conn.client_ip.categories) ||
+        req.user_agent.contains('Diffbot') ||
+        req.user_agent.contains('Scrapy')
+    actions:
+      - type: deny
+
+  ## Optional: Require OAuth to protect the editor and other non-workflow endpoints from unauthorized traffic.
+  ## Other auth options are also supported (e.g. basic auth): https://ngrok.com/docs/gateway/traffic-policy/examples/add-authentication
+  # - name: Require Google OAuth for non-workflow endpoints
+  #   expressions:
+  #     - >-
+  #       !req.url.path.matches('^/(webhook|webhook-test|webhook-waiting|form|form-test|form-waiting|mcp|mcp-test)(/.*)?$')
+  #   actions:
+  #     # Omitting client credentials uses ngrok’s managed Google OAuth application.
+  #     - type: oauth
+  #       config:
+  #         provider: google
+
+  ## Optional: Use with OAuth to restrict access to a specific domain or email list
+  # - name: Allow only specific email addresses for OAuth-protected endpoints
+  #   expressions:
+  ## Uncomment one of the following expressions
+  # - "has(actions.ngrok.oauth.identity) && !actions.ngrok.oauth.identity.email.endsWith('@example.com')" # Restrict to domain
+  # - "!(actions.ngrok.oauth.identity.email in ['user@example.com'])" # Restrict to specific emails
+  # actions:
+  #   - type: deny
+
+  # Rate limiting costs 1 TPU (Traffic Policy Unit) per execution, with 1 TPU costing $0.000001.
+  # For example, $1 covers around 1 million rate-limit action executions.
+  # It's not free, which is why it's disabled by default, but is an option for preventing excessive traffic reaching n8n.
+  # It's placed last so requests we can identify as unwanted are blocked first,
+  # and we only pay to rate-limit potentially valid requests.
+  # - name: Rate limit suspicious bursts per IP
+  #   actions:
+  #     - type: rate-limit
+  #       config:
+  #         name: 15 requests/min
+  #         algorithm: sliding_window
+  #         capacity: 15
+  #         rate: 60s
+  #         bucket_key:
+  #           - conn.client_ip
